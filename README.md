@@ -26,4 +26,4 @@ A fast, lightweight, and feature-rich command-line hex editor written in Rust. D
 
 ## ⭐ Star History
 
-[](https://github.com/star-history/star-history)
+[[](https://github.com/star-history/star-history)](https://github.com/star-history/star-history)
