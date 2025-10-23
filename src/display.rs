@@ -2,11 +2,11 @@ use crate::config::Config;
 use crate::editor::{EditMode, HexEditor};
 use anyhow::Result;
 use crossterm::{
-    cursor, execute, ExecutableCommand,
+    ExecutableCommand, cursor, execute,
     style::{Color, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
-use std::io::{Write, stdout};
+use std::io::{BufWriter, Stdout, Write, stdout};
 
 pub struct Display {
     width: u16,
@@ -30,22 +30,30 @@ impl Display {
         self.width = width;
         self.height = height;
 
-        // Очистка экрана
-        execute!(stdout(), Clear(ClearType::All))?;
+        // Используем буферизированный вывод для уменьшения мерцания
+        let mut stdout = BufWriter::new(stdout());
+
+        // Перемещаемся в начало, но НЕ очищаем весь экран
+        execute!(stdout, cursor::MoveTo(0, 0))?;
 
         // Отрисовка компонентов
-        self.draw_header(editor)?;
-        self.draw_content(editor)?;
-        self.draw_status_bar(editor)?;
+        self.draw_header_buffered(&mut stdout, editor)?;
+        self.draw_content_buffered(&mut stdout, editor)?;
+        self.draw_status_bar_buffered(&mut stdout, editor)?;
 
-        stdout().flush()?;
+        // Сбрасываем буфер один раз
+        stdout.flush()?;
         Ok(())
     }
 
-    fn draw_header(&self, editor: &HexEditor) -> Result<()> {
-        stdout().execute(cursor::MoveTo(0, 0))?;
-        stdout().execute(SetBackgroundColor(Color::DarkBlue))?;
-        stdout().execute(SetForegroundColor(Color::White))?;
+    fn draw_header_buffered(
+        &self,
+        stdout: &mut BufWriter<Stdout>,
+        editor: &HexEditor,
+    ) -> Result<()> {
+        execute!(stdout, cursor::MoveTo(0, 0))?;
+        execute!(stdout, SetBackgroundColor(Color::DarkBlue))?;
+        execute!(stdout, SetForegroundColor(Color::White))?;
 
         let header = format!(
             " HEX EDITOR - {} {} {} {}",
@@ -67,13 +75,13 @@ impl Display {
             }
         );
 
-        print!("{:width$}", header, width = self.width as usize);
-        stdout().execute(ResetColor)?;
+        write!(stdout, "{:width$}", header, width = self.width as usize)?;
+        execute!(stdout, ResetColor)?;
 
         // Динамический заголовок колонок
-        stdout().execute(cursor::MoveTo(0, 2))?;
-        stdout().execute(SetForegroundColor(Color::DarkGrey))?;
-        print!("  Offset  ");
+        execute!(stdout, cursor::MoveTo(0, 2))?;
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        write!(stdout, "  Offset  ")?;
 
         // Расчет динамического количества байтов на строку
         let available_width = self.width as usize;
@@ -88,15 +96,19 @@ impl Display {
         .min(32);
 
         for i in 0..bytes_per_line {
-            print!("{:02X} ", i);
+            write!(stdout, "{:02X} ", i)?;
         }
-        print!("  ASCII");
-        stdout().execute(ResetColor)?;
+        write!(stdout, "  ASCII")?;
+        execute!(stdout, ResetColor)?;
 
         Ok(())
     }
 
-    fn draw_content(&self, editor: &HexEditor) -> Result<()> {
+    fn draw_content_buffered(
+        &self,
+        stdout: &mut BufWriter<Stdout>,
+        editor: &HexEditor,
+    ) -> Result<()> {
         let data = editor.get_data();
         let cursor_pos = editor.get_cursor_pos();
         let view_offset = editor.get_view_offset();
@@ -118,17 +130,19 @@ impl Display {
 
         for line_idx in 0..visible_lines {
             let y = 3 + line_idx;
-            stdout().execute(cursor::MoveTo(0, y as u16))?;
+            execute!(stdout, cursor::MoveTo(0, y as u16))?;
 
             let offset = view_offset + line_idx * bytes_per_line;
             if offset >= data.len() {
-                break;
+                // Очищаем оставшиеся строки
+                execute!(stdout, Clear(ClearType::CurrentLine))?;
+                continue;
             }
 
             // Адрес
-            stdout().execute(SetForegroundColor(Color::Yellow))?;
-            print!("{:08X}  ", offset);
-            stdout().execute(ResetColor)?;
+            execute!(stdout, SetForegroundColor(Color::Yellow))?;
+            write!(stdout, "{:08X}  ", offset)?;
+            execute!(stdout, ResetColor)?;
 
             // Hex данные
             for byte_idx in 0..bytes_per_line {
@@ -137,18 +151,18 @@ impl Display {
                 if pos < data.len() {
                     // Подсветка курсора
                     if pos == cursor_pos && mode == EditMode::Hex {
-                        stdout().execute(SetBackgroundColor(Color::DarkGreen))?;
-                        stdout().execute(SetForegroundColor(Color::White))?;
+                        execute!(stdout, SetBackgroundColor(Color::DarkGreen))?;
+                        execute!(stdout, SetForegroundColor(Color::White))?;
                     }
 
-                    print!("{:02X} ", data[pos]);
-                    stdout().execute(ResetColor)?;
+                    write!(stdout, "{:02X} ", data[pos])?;
+                    execute!(stdout, ResetColor)?;
                 } else {
-                    print!("   ");
+                    write!(stdout, "   ")?;
                 }
             }
 
-            print!(" ");
+            write!(stdout, " ")?;
 
             // ASCII представление
             for byte_idx in 0..bytes_per_line {
@@ -164,26 +178,33 @@ impl Display {
 
                     // Подсветка курсора
                     if pos == cursor_pos && mode == EditMode::Ascii {
-                        stdout().execute(SetBackgroundColor(Color::DarkGreen))?;
-                        stdout().execute(SetForegroundColor(Color::White))?;
+                        execute!(stdout, SetBackgroundColor(Color::DarkGreen))?;
+                        execute!(stdout, SetForegroundColor(Color::White))?;
                     }
 
-                    print!("{}", ch);
-                    stdout().execute(ResetColor)?;
+                    write!(stdout, "{}", ch)?;
+                    execute!(stdout, ResetColor)?;
                 } else {
-                    print!(" ");
+                    write!(stdout, " ")?;
                 }
             }
+
+            // Очищаем остаток строки
+            execute!(stdout, Clear(ClearType::UntilNewLine))?;
         }
 
         Ok(())
     }
 
-    fn draw_status_bar(&self, editor: &HexEditor) -> Result<()> {
+    fn draw_status_bar_buffered(
+        &self,
+        stdout: &mut BufWriter<Stdout>,
+        editor: &HexEditor,
+    ) -> Result<()> {
         let y = self.height - 1;
-        stdout().execute(cursor::MoveTo(0, y))?;
-        stdout().execute(SetBackgroundColor(Color::DarkGrey))?;
-        stdout().execute(SetForegroundColor(Color::White))?;
+        execute!(stdout, cursor::MoveTo(0, y))?;
+        execute!(stdout, SetBackgroundColor(Color::DarkGrey))?;
+        execute!(stdout, SetForegroundColor(Color::White))?;
 
         let cursor_pos = editor.get_cursor_pos();
         let file_size = editor.get_data().len();
@@ -193,12 +214,12 @@ impl Display {
         };
 
         let status = format!(
-            " Pos: 0x{:08X} ({}/{}) | Mode: {} | Ctrl+Q: Quit | Ctrl+S: Save | Ctrl+Z: Undo | Ctrl+Y: Redo | Ctrl+I: Insert Hex | Ctrl+V: Insert ASCII | Ins: Insert 0x00 ",
+            " Pos: 0x{:08X} ({}/{}) | Mode: {} | Ctrl+Q: Quit | Ctrl+S: Save | Ctrl+Z: Undo | Ctrl+Y: Redo | Tab: Switch Mode ",
             cursor_pos, cursor_pos, file_size, mode_str
         );
 
-        print!("{:width$}", status, width = self.width as usize);
-        stdout().execute(ResetColor)?;
+        write!(stdout, "{:width$}", status, width = self.width as usize)?;
+        execute!(stdout, ResetColor)?;
 
         Ok(())
     }
