@@ -1,123 +1,29 @@
-# Hexr - Hex Editor
+# HexR - Cross-Platform CLI Hex Editor
 
-Hexr - это консольный hex-редактор, написанный на Rust. Он позволяет просматривать и редактировать бинарные файлы в шестнадцатеричном формате с поддержкой ASCII представления.
+![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
+![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)
+[![Crates.io](https://img.shields.io/crates/v/hexr.svg)](https://crates.io/crates/hexr)
 
-## Возможности
+A fast, lightweight, and feature-rich command-line hex editor written in Rust. Designed for developers, reverse engineers, and anyone who needs to inspect and edit binary files at the byte level.
 
-- **Двойной режим отображения**: одновременное отображение hex и ASCII представлений
-- **Навигация**: поддержка всех стандартных клавиш навигации (стрелки, Page Up/Down, Home/End)
-- **Редактирование**: редактирование в hex или ASCII режиме
-- **Поиск**: поиск последовательностей байтов
-- **Переход к адресу**: прямой переход к указанному адресу в файле
-- **Undo/Redo**: поддержка отмены и повтора операций (до 1000 операций)
-- **Конфигурация**: настраиваемые параметры через TOML конфигурационный файл
-- **Режим только для чтения**: безопасное открытие файлов без возможности изменения
+## ✨ Features
 
-## Установка
+- 🚀 **Fast and Lightweight** - Instant startup, minimal memory footprint
+- 🖥️ **Cross-Platform** - Native support for Windows, Linux, and macOS
+- 📝 **Dual Edit Modes** - Switch between HEX and ASCII editing modes
+- 🔍 **Search Functionality** - Find byte patterns quickly
+- 📍 **Go to Address** - Jump directly to any offset
+- 💾 **Safe Editing** - Read-only mode and modification tracking
+- 🎨 **Syntax Highlighting** - Color-coded display for better readability
+- ⌨️ **Intuitive Controls** - Familiar keyboard shortcuts
+- 📊 **Status Bar** - Real-time position and file information
+- 🔧 **No Dependencies** - Pure Rust implementation
 
-### Требования
+## 📸 Screenshots
 
-- Rust 1.70.0 или новее
-- Современный терминал с поддержкой ANSI цветов
+<img width="847" height="295" alt="NVIDIA_Overlay_Km04m3CQcV" src="https://github.com/user-attachments/assets/36f81f8d-3d37-4b5c-8074-c6cadd0edc3e" />
 
-### Сборка
+## ⭐ Star History
 
-```bash
-git clone <repository-url>
-cd hexr
-cargo build --release
-```
-
-## Использование
-
-```bash
-# Открыть файл для редактирования
-./target/release/hexr filename.bin
-
-# Открыть файл в режиме только для чтения
-./target/release/hexr filename.bin --readonly
-
-# Создать новый файл размером 1KB, заполненный нулями
-./target/release/hexr new_file.bin --new 1024
-
-# Создать новый файл размером 1KB, заполненный значением 0xFF
-./target/release/hexr new_file.bin --new 1024 --pattern ff
-
-# Показать справку
-./target/release/hexr --help
-```
-
-## Управление
-
-### Навигация
-- `↑↓←→` - перемещение курсора
-- `Page Up/Page Down` - постраничная навигация
-- `Home/End` - переход в начало/конец строки
-- `Ctrl+G` - переход к указанному адресу
-
-### Редактирование
-- `Tab` - переключение между hex и ASCII режимами
-- `0-9, A-F` - ввод hex значений (в hex режиме)
-- `A-Z, a-z, 0-9, пробел и другие печатные символы` - ввод ASCII символов (в ASCII режиме)
-
-### Операции
-- `Ctrl+S` - сохранить файл
-- `Ctrl+Z` - отменить последнюю операцию
-- `Ctrl+Y` - повторить отмененную операцию
-- `Ctrl+F` - поиск последовательности байтов
-- `Ctrl+Q` - выйти из редактора
-
-## Конфигурация
-
-При первом запуске создается конфигурационный файл `~/.config/hexr/config.toml`:
-
-```toml
-[editor]
-bytes_per_line = 16
-tab_size = 4
-auto_save = false
-auto_save_interval = 30
-
-[display]
-show_line_numbers = true
-show_ascii = true
-highlight_current_line = true
-show_status_bar = true
-
-[colors]
-background = "black"
-foreground = "white"
-cursor = "green"
-selection = "blue"
-header = "blue"
-status_bar = "grey"
-modified_indicator = "red"
-```
-
-## Архитектура
-
-Проект организован по модулям:
-
-- `main.rs` - точка входа и основной цикл обработки событий
-- `editor.rs` - ядро редактора, логика редактирования и навигации
-- `display.rs` - отображение интерфейса с использованием crossterm
-- `undo_redo.rs` - система отмены и повтора операций
-- `config.rs` - загрузка и сохранение конфигурации
-- `utils.rs` - вспомогательные функции
-
-## Зависимости
-
-- `crossterm` - кросс-платформенная библиотека для работы с терминалом
-- `clap` - парсер командной строки
-- `anyhow` - удобная обработка ошибок
-- `toml` - парсер TOML конфигурационных файлов
-- `serde` - сериализация/десериализация
-- `dirs` - определение стандартных директорий
-
-## Лицензия
-
-MIT License
-
-## Вклад
-
-Будем рады вашим вкладам! Пожалуйста, создавайте issues для багов и feature requests, и отправляйте pull requests с улучшениями.
+[![Star History Chart](https://api.star-history.com/svg?repos=ml0ccy/hexr&type=Date)](https://star-history.com/#ml0ccy/hexr&Date)
