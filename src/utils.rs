@@ -60,10 +60,3 @@ pub fn hex_string_to_bytes(hex: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub fn bytes_to_hex_string(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect::<Vec<_>>()
-        .join(" ")
-}

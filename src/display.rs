@@ -2,10 +2,10 @@ use crate::editor::{EditMode, HexEditor};
 use anyhow::Result;
 use crossterm::{
     ExecutableCommand, cursor,
-    style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
+    style::{Color, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal,
 };
-use std::io::{Write, stdout};
+use std::io::stdout;
 
 pub struct Display {
     width: u16,
@@ -21,18 +21,20 @@ impl Display {
     pub fn draw(&self, editor: &HexEditor) -> Result<()> {
         self.draw_header(editor)?;
         self.draw_content(editor)?;
-        self.draw_status_bar(editor)?;
+        if editor.get_config().display.show_status_bar {
+            self.draw_status_bar(editor)?;
+        }
         self.draw_help()?;
         Ok(())
     }
 
     fn draw_header(&self, editor: &HexEditor) -> Result<()> {
-        stdout().execute(cursor::MoveTo(0, 0))?;
+        // Курсор уже позиционирован в (0,0) в main.rs
         stdout().execute(SetBackgroundColor(Color::DarkBlue))?;
         stdout().execute(SetForegroundColor(Color::White))?;
 
         let header = format!(
-            " HEX EDITOR - {} {} {}",
+            " HEX EDITOR - {} {} {} {}",
             editor.get_file_path(),
             if editor.is_modified() {
                 "[Modified]"
@@ -41,6 +43,11 @@ impl Display {
             },
             if editor.is_readonly() {
                 "[Read-Only]"
+            } else {
+                ""
+            },
+            if editor.is_new_file() {
+                "[New File]"
             } else {
                 ""
             }
@@ -148,12 +155,17 @@ impl Display {
             EditMode::Ascii => "ASCII",
         };
 
+        let undo_status = if editor.can_undo() { "✓" } else { "✗" };
+        let redo_status = if editor.can_redo() { "✓" } else { "✗" };
+
         let status = format!(
-            " Mode: {} | Position: 0x{:08X} / 0x{:08X} ({:.1}%) ",
+            " Mode: {} | Pos: 0x{:08X}/{:08X} ({:.1}%) | Undo:{} Redo:{} ",
             mode,
             cursor_pos,
             data_len,
-            (cursor_pos as f64 / data_len as f64) * 100.0
+            (cursor_pos as f64 / data_len as f64) * 100.0,
+            undo_status,
+            redo_status
         );
 
         print!("{:width$}", status, width = self.width as usize);
@@ -167,7 +179,7 @@ impl Display {
         stdout().execute(cursor::MoveTo(0, y))?;
         stdout().execute(SetForegroundColor(Color::DarkGrey))?;
 
-        print!("^Q:Quit ^S:Save ^F:Find ^G:Goto Tab:Mode ↑↓←→:Navigate PgUp/PgDn:Page");
+        print!("^Q:Quit ^S:Save ^Z:Undo ^Y:Redo ^F:Find ^G:Goto Tab:Mode 0-9A-F:Edit Hex a-z:Edit ASCII ↑↓←→:Navigate PgUp/PgDn:Page");
         stdout().execute(ResetColor)?;
 
         Ok(())

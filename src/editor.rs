@@ -1,9 +1,10 @@
+use crate::config::Config;
 use crate::display::Display;
+use crate::undo_redo::{EditOperation, UndoRedoStack};
 use crate::utils;
 use anyhow::{Result, bail};
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::io::{Read, Write};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EditMode {
@@ -23,16 +24,29 @@ pub struct HexEditor {
     bytes_per_line: usize,
     half_byte: Option<u8>,
     display: Display,
+    undo_redo_stack: UndoRedoStack,
+    config: Config,
+    is_new_file: bool,
 }
 
 impl HexEditor {
-    pub fn new(file_path: &str, readonly: bool) -> Result<Self> {
-        let mut file = File::open(file_path)?;
-        let mut data = Vec::new();
-        file.read_to_end(&mut data)?;
+    pub fn new(file_path: &str, readonly: bool, new_size: Option<usize>, pattern: &str) -> Result<Self> {
+        let (data, original_data, modified, is_new) = if let Some(size) = new_size {
+            // Создаем новый файл
+            let fill_byte = u8::from_str_radix(pattern.trim_start_matches("0x"), 16)
+                .unwrap_or(0);
+            let new_data = vec![fill_byte; size];
+            (new_data.clone(), new_data, true, true)
+        } else {
+            // Открываем существующий файл
+            let mut file = File::open(file_path)?;
+            let mut data = Vec::new();
+            file.read_to_end(&mut data)?;
+            (data.clone(), data, false, false)
+        };
 
-        let original_data = data.clone();
         let display = Display::new()?;
+        let config = Config::load();
 
         Ok(Self {
             file_path: file_path.to_string(),
@@ -42,10 +56,13 @@ impl HexEditor {
             view_offset: 0,
             mode: EditMode::Hex,
             readonly,
-            modified: false,
-            bytes_per_line: 16,
+            modified,
+            bytes_per_line: config.editor.bytes_per_line,
             half_byte: None,
             display,
+            undo_redo_stack: UndoRedoStack::default(),
+            config,
+            is_new_file: is_new,
         })
     }
 
@@ -64,6 +81,7 @@ impl HexEditor {
 
         let mut file = OpenOptions::new()
             .write(true)
+            .create(true)
             .truncate(true)
             .open(&self.file_path)?;
 
@@ -72,8 +90,45 @@ impl HexEditor {
 
         self.original_data = self.data.clone();
         self.modified = false;
+        self.undo_redo_stack.clear(); // Очищаем историю после сохранения
 
         Ok(())
+    }
+
+    pub fn undo(&mut self) -> Result<()> {
+        if self.readonly {
+            bail!("Cannot undo in read-only mode");
+        }
+
+        if let Some(operation) = self.undo_redo_stack.undo() {
+            operation.undo(&mut self.data);
+            self.modified = true;
+        }
+        Ok(())
+    }
+
+    pub fn redo(&mut self) -> Result<()> {
+        if self.readonly {
+            bail!("Cannot redo in read-only mode");
+        }
+
+        if let Some(operation) = self.undo_redo_stack.redo() {
+            operation.redo(&mut self.data);
+            self.modified = true;
+        }
+        Ok(())
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.undo_redo_stack.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.undo_redo_stack.can_redo()
+    }
+
+    pub fn get_config(&self) -> &Config {
+        &self.config
     }
 
     pub fn move_cursor_up(&mut self) {
@@ -87,6 +142,10 @@ impl HexEditor {
         if self.cursor_pos + self.bytes_per_line < self.data.len() {
             self.cursor_pos += self.bytes_per_line;
             self.adjust_view();
+        } else if self.cursor_pos < self.data.len() {
+            // Перемещаемся к концу файла
+            self.cursor_pos = self.data.len().saturating_sub(1);
+            self.adjust_view();
         }
     }
 
@@ -98,7 +157,7 @@ impl HexEditor {
     }
 
     pub fn move_cursor_right(&mut self) {
-        if self.cursor_pos < self.data.len() - 1 {
+        if self.cursor_pos < self.data.len().saturating_sub(1) {
             self.cursor_pos += 1;
             self.adjust_view();
         }
@@ -120,7 +179,7 @@ impl HexEditor {
         let lines_per_page = self.display.get_visible_lines();
         let jump = lines_per_page * self.bytes_per_line;
 
-        self.cursor_pos = (self.cursor_pos + jump).min(self.data.len() - 1);
+        self.cursor_pos = (self.cursor_pos + jump).min(self.data.len().saturating_sub(1));
         self.adjust_view();
     }
 
@@ -130,7 +189,7 @@ impl HexEditor {
 
     pub fn move_to_line_end(&mut self) {
         let line_start = (self.cursor_pos / self.bytes_per_line) * self.bytes_per_line;
-        let line_end = (line_start + self.bytes_per_line - 1).min(self.data.len() - 1);
+        let line_end = (line_start + self.bytes_per_line).saturating_sub(1).min(self.data.len().saturating_sub(1));
         self.cursor_pos = line_end;
     }
 
@@ -151,11 +210,21 @@ impl HexEditor {
 
         if let Some(high) = self.half_byte {
             // Второй полубайт
-            self.data[self.cursor_pos] = (high << 4) | value;
+            if self.cursor_pos >= self.data.len() {
+                self.half_byte = None;
+                return Ok(());
+            }
+
+            let old_value = self.data[self.cursor_pos];
+            let new_value = (high << 4) | value;
+            self.data[self.cursor_pos] = new_value;
             self.modified = true;
             self.half_byte = None;
 
-            if self.cursor_pos < self.data.len() - 1 {
+            // Сохраняем операцию для undo/redo
+            self.undo_redo_stack.push(EditOperation::new_replace_byte(self.cursor_pos, old_value, new_value));
+
+            if self.cursor_pos + 1 < self.data.len() {
                 self.cursor_pos += 1;
             }
         } else {
@@ -171,10 +240,19 @@ impl HexEditor {
             return Ok(());
         }
 
-        self.data[self.cursor_pos] = c as u8;
+        if self.cursor_pos >= self.data.len() {
+            return Ok(());
+        }
+
+        let old_value = self.data[self.cursor_pos];
+        let new_value = c as u8;
+        self.data[self.cursor_pos] = new_value;
         self.modified = true;
 
-        if self.cursor_pos < self.data.len() - 1 {
+        // Сохраняем операцию для undo/redo
+        self.undo_redo_stack.push(EditOperation::new_replace_byte(self.cursor_pos, old_value, new_value));
+
+        if self.cursor_pos + 1 < self.data.len() {
             self.cursor_pos += 1;
         }
 
@@ -196,11 +274,25 @@ impl HexEditor {
 
     pub fn goto_address(&mut self) -> Result<()> {
         let input = utils::get_user_input("Go to address (hex): ")?;
-        let address = usize::from_str_radix(&input, 16)?;
 
-        if address < self.data.len() {
-            self.cursor_pos = address;
-            self.adjust_view();
+        if input.trim().is_empty() {
+            return Ok(());
+        }
+
+        match usize::from_str_radix(&input, 16) {
+            Ok(address) => {
+                if address < self.data.len() {
+                    self.cursor_pos = address;
+                    self.adjust_view();
+                } else {
+                    // Адрес за пределами файла - переходим к концу
+                    self.cursor_pos = self.data.len().saturating_sub(1);
+                    self.adjust_view();
+                }
+            }
+            Err(_) => {
+                // Неверный формат адреса - игнорируем
+            }
         }
 
         Ok(())
@@ -211,12 +303,15 @@ impl HexEditor {
             return None;
         }
 
-        for i in start..self.data.len() - pattern.len() + 1 {
-            if &self.data[i..i + pattern.len()] == pattern {
-                return Some(i);
-            }
+        let data_len = self.data.len();
+        let pattern_len = pattern.len();
+
+        if pattern_len > data_len {
+            return None;
         }
-        None
+
+        (start..=data_len.saturating_sub(pattern_len))
+            .find(|&i| &self.data[i..i + pattern_len] == pattern)
     }
 
     fn adjust_view(&mut self) {
@@ -258,5 +353,9 @@ impl HexEditor {
     }
     pub fn is_readonly(&self) -> bool {
         self.readonly
+    }
+
+    pub fn is_new_file(&self) -> bool {
+        self.is_new_file
     }
 }

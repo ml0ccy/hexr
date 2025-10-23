@@ -1,0 +1,22 @@
+# Hex Editor Configuration File
+
+[editor]
+bytes_per_line = 16
+tab_size = 4
+auto_save = false
+auto_save_interval = 30
+
+[display]
+show_line_numbers = true
+show_ascii = true
+highlight_current_line = true
+show_status_bar = true
+
+[colors]
+background = "black"
+foreground = "white"
+cursor = "green"
+selection = "blue"
+header = "blue"
+status_bar = "grey"
+modified_indicator = "red"
