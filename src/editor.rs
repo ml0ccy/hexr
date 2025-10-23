@@ -388,4 +388,84 @@ impl HexEditor {
         }
         Ok(())
     }
+
+    pub fn insert_byte(&mut self, value: u8) -> Result<()> {
+        if self.readonly {
+            bail!("Cannot insert in read-only mode");
+        }
+
+        let position = self.cursor_pos;
+
+        // Вставляем байт в текущую позицию курсора
+        self.data.insert(position, value);
+        self.modified = true;
+
+        // Сохраняем операцию для undo/redo
+        self.undo_redo_stack.push(EditOperation::new_insert_byte(position, value));
+
+        // Перемещаем курсор на следующую позицию
+        if position < self.data.len() - 1 {
+            self.cursor_pos += 1;
+        }
+
+        self.adjust_view();
+        Ok(())
+    }
+
+    pub fn insert_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if self.readonly {
+            bail!("Cannot insert in read-only mode");
+        }
+
+        if bytes.is_empty() {
+            return Ok(());
+        }
+
+        let position = self.cursor_pos;
+
+        // Вставляем байты в текущую позицию курсора
+        for (i, &byte) in bytes.iter().enumerate() {
+            self.data.insert(position + i, byte);
+        }
+        self.modified = true;
+
+        // Сохраняем операцию для undo/redo
+        self.undo_redo_stack.push(EditOperation::new_insert_bytes(position, bytes.to_vec()));
+
+        // Перемещаем курсор в конец вставленного блока
+        self.cursor_pos = position + bytes.len();
+
+        self.adjust_view();
+        Ok(())
+    }
+
+    pub fn insert_from_hex_string(&mut self, hex_string: &str) -> Result<()> {
+        let bytes = utils::hex_string_to_bytes(hex_string)?;
+        self.insert_bytes(&bytes)
+    }
+
+    pub fn insert_from_ascii_string(&mut self, ascii_string: &str) -> Result<()> {
+        let bytes: Vec<u8> = ascii_string.as_bytes().to_vec();
+        self.insert_bytes(&bytes)
+    }
+
+    pub fn insert_from_hex_input(&mut self) -> Result<()> {
+        let input = utils::get_user_input("Insert hex bytes: ")?;
+
+        if input.trim().is_empty() {
+            return Ok(());
+        }
+
+        self.insert_from_hex_string(&input)
+    }
+
+    pub fn insert_from_ascii_input(&mut self) -> Result<()> {
+        let input = utils::get_user_input("Insert ASCII text: ")?;
+
+        if input.trim().is_empty() {
+            return Ok(());
+        }
+
+        self.insert_from_ascii_string(&input)
+    }
 }

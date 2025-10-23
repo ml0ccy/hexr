@@ -21,13 +21,31 @@ impl EditOperation {
         Self::ReplaceByte { position, old_value, new_value }
     }
 
+    pub fn new_insert_byte(position: usize, new_value: u8) -> Self {
+        Self::InsertByte {
+            position,
+            old_value: None,
+            new_value,
+        }
+    }
+
+    pub fn new_insert_bytes(position: usize, new_values: Vec<u8>) -> Self {
+        Self::InsertBytes {
+            position,
+            old_values: Vec::new(),
+            new_values,
+        }
+    }
+
     pub fn undo(&self, data: &mut Vec<u8>) {
         match self {
             EditOperation::InsertByte { position, old_value, .. } => {
                 if let Some(old_val) = old_value {
                     data[*position] = *old_val;
                 } else {
-                    data.remove(*position);
+                    if *position < data.len() {
+                        data.remove(*position);
+                    }
                 }
             }
             EditOperation::DeleteByte { position, old_value } => {
@@ -38,15 +56,15 @@ impl EditOperation {
             }
             EditOperation::InsertBytes { position, old_values, .. } => {
                 if old_values.is_empty() {
-                    data.truncate(*position);
+                    // Удаляем вставленные байты
+                    let current_len = data.len();
+                    let end_pos = (*position + 0).min(current_len);
+                    data.drain(*position..end_pos);
                 } else {
+                    // Восстанавливаем старые значения
                     let current_len = data.len();
                     let end_pos = (*position + old_values.len()).min(current_len);
                     data.splice(*position..end_pos, old_values.iter().cloned());
-                    // Если вставили больше, чем было, усекаем
-                    if end_pos < current_len {
-                        data.truncate(current_len - (current_len - end_pos) + old_values.len());
-                    }
                 }
             }
             EditOperation::DeleteBytes { position, old_values } => {
@@ -61,11 +79,7 @@ impl EditOperation {
     pub fn redo(&self, data: &mut Vec<u8>) {
         match self {
             EditOperation::InsertByte { position, new_value, .. } => {
-                if *position < data.len() {
-                    data[*position] = *new_value;
-                } else {
-                    data.push(*new_value);
-                }
+                data.insert(*position, *new_value);
             }
             EditOperation::DeleteByte { position, .. } => {
                 if *position < data.len() {
@@ -78,13 +92,7 @@ impl EditOperation {
                 }
             }
             EditOperation::InsertBytes { position, new_values, .. } => {
-                let current_len = data.len();
-                if *position <= current_len {
-                    data.splice(*position..*position, new_values.iter().cloned());
-                } else {
-                    // Если позиция за пределами массива, добавляем в конец
-                    data.extend_from_slice(new_values);
-                }
+                data.splice(*position..*position, new_values.iter().cloned());
             }
             EditOperation::DeleteBytes { position, old_values } => {
                 let current_len = data.len();

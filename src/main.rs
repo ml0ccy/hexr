@@ -222,6 +222,37 @@ fn handle_input(editor: &mut editor::HexEditor, key: KeyEvent) -> Result<bool> {
             editor.input_ascii_char(c)?;
         }
 
+        // Вставка hex строки (Ctrl+I)
+        KeyEvent {
+            code: KeyCode::Char('i'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => editor.insert_from_hex_input()?,
+
+        // Вставка ASCII строки (Ctrl+V)
+        KeyEvent {
+            code: KeyCode::Char('v'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => editor.insert_from_ascii_input()?,
+
+        // Вставка байта 0xFF (Ctrl+Insert)
+        KeyEvent {
+            code: KeyCode::Insert,
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => {
+            editor.insert_byte(0xFF)?;
+        }
+
+        // Вставка байта 0x00 (Insert key)
+        KeyEvent {
+            code: KeyCode::Insert,
+            ..
+        } => {
+            editor.insert_byte(0x00)?;
+        }
+
         _ => {}
     }
 

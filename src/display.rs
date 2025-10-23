@@ -193,7 +193,7 @@ impl Display {
         };
 
         let status = format!(
-            " Pos: 0x{:08X} ({}/{}) | Mode: {} | Ctrl+Q: Quit | Ctrl+S: Save | Ctrl+Z: Undo | Ctrl+Y: Redo | Tab: Switch Mode ",
+            " Pos: 0x{:08X} ({}/{}) | Mode: {} | Ctrl+Q: Quit | Ctrl+S: Save | Ctrl+Z: Undo | Ctrl+Y: Redo | Ctrl+I: Insert Hex | Ctrl+V: Insert ASCII | Ins: Insert 0x00 ",
             cursor_pos, cursor_pos, file_size, mode_str
         );
 
