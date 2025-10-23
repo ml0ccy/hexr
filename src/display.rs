@@ -1,35 +1,49 @@
+use crate::config::Config;
 use crate::editor::{EditMode, HexEditor};
 use anyhow::Result;
 use crossterm::{
-    ExecutableCommand, cursor,
+    cursor, execute, ExecutableCommand,
     style::{Color, ResetColor, SetBackgroundColor, SetForegroundColor},
-    terminal,
+    terminal::{self, Clear, ClearType},
 };
-use std::io::stdout;
+use std::io::{Write, stdout};
 
 pub struct Display {
     width: u16,
     height: u16,
+    config: Config,
 }
 
 impl Display {
     pub fn new() -> Result<Self> {
         let (width, height) = terminal::size()?;
-        Ok(Self { width, height })
+        Ok(Self {
+            width,
+            height,
+            config: Config::default(),
+        })
     }
 
-    pub fn draw(&self, editor: &HexEditor) -> Result<()> {
+    pub fn draw(&mut self, editor: &HexEditor) -> Result<()> {
+        // Обновление размеров терминала
+        let (width, height) = terminal::size()?;
+        self.width = width;
+        self.height = height;
+
+        // Очистка экрана
+        execute!(stdout(), Clear(ClearType::All))?;
+
+        // Отрисовка компонентов
         self.draw_header(editor)?;
         self.draw_content(editor)?;
-        if editor.get_config().display.show_status_bar {
-            self.draw_status_bar(editor)?;
-        }
-        self.draw_help()?;
+        self.draw_status_bar(editor)?;
+
+        stdout().flush()?;
         Ok(())
     }
 
     fn draw_header(&self, editor: &HexEditor) -> Result<()> {
-        // Курсор уже позиционирован в (0,0) в main.rs
+        stdout().execute(cursor::MoveTo(0, 0))?;
         stdout().execute(SetBackgroundColor(Color::DarkBlue))?;
         stdout().execute(SetForegroundColor(Color::White))?;
 
@@ -56,12 +70,24 @@ impl Display {
         print!("{:width$}", header, width = self.width as usize);
         stdout().execute(ResetColor)?;
 
-        // Заголовок колонок
+        // Динамический заголовок колонок
         stdout().execute(cursor::MoveTo(0, 2))?;
         stdout().execute(SetForegroundColor(Color::DarkGrey))?;
         print!("  Offset  ");
 
-        for i in 0..16 {
+        // Расчет динамического количества байтов на строку
+        let available_width = self.width as usize;
+        let offset_width = 10;
+        let ascii_label_width = 8;
+        let separator_width = 2;
+
+        let bytes_per_line = ((available_width
+            .saturating_sub(offset_width + separator_width + ascii_label_width))
+            / 4)
+        .max(8)
+        .min(32);
+
+        for i in 0..bytes_per_line {
             print!("{:02X} ", i);
         }
         print!("  ASCII");
@@ -74,8 +100,19 @@ impl Display {
         let data = editor.get_data();
         let cursor_pos = editor.get_cursor_pos();
         let view_offset = editor.get_view_offset();
-        let bytes_per_line = editor.get_bytes_per_line();
         let mode = editor.get_mode();
+
+        // Динамический расчет bytes_per_line на основе ширины терминала
+        let available_width = self.width as usize;
+        let offset_width = 10;
+        let ascii_label_width = 8;
+        let separator_width = 2;
+
+        let bytes_per_line = ((available_width
+            .saturating_sub(offset_width + separator_width + ascii_label_width))
+            / 4)
+        .max(8)
+        .min(32);
 
         let visible_lines = self.get_visible_lines();
 
@@ -143,29 +180,21 @@ impl Display {
     }
 
     fn draw_status_bar(&self, editor: &HexEditor) -> Result<()> {
-        let y = self.height - 2;
+        let y = self.height - 1;
         stdout().execute(cursor::MoveTo(0, y))?;
         stdout().execute(SetBackgroundColor(Color::DarkGrey))?;
         stdout().execute(SetForegroundColor(Color::White))?;
 
         let cursor_pos = editor.get_cursor_pos();
-        let data_len = editor.get_data().len();
-        let mode = match editor.get_mode() {
+        let file_size = editor.get_data().len();
+        let mode_str = match editor.get_mode() {
             EditMode::Hex => "HEX",
             EditMode::Ascii => "ASCII",
         };
 
-        let undo_status = if editor.can_undo() { "✓" } else { "✗" };
-        let redo_status = if editor.can_redo() { "✓" } else { "✗" };
-
         let status = format!(
-            " Mode: {} | Pos: 0x{:08X}/{:08X} ({:.1}%) | Undo:{} Redo:{} ",
-            mode,
-            cursor_pos,
-            data_len,
-            (cursor_pos as f64 / data_len as f64) * 100.0,
-            undo_status,
-            redo_status
+            " Pos: 0x{:08X} ({}/{}) | Mode: {} | Ctrl+Q: Quit | Ctrl+S: Save | Ctrl+Z: Undo | Ctrl+Y: Redo | Tab: Switch Mode ",
+            cursor_pos, cursor_pos, file_size, mode_str
         );
 
         print!("{:width$}", status, width = self.width as usize);
@@ -174,18 +203,8 @@ impl Display {
         Ok(())
     }
 
-    fn draw_help(&self) -> Result<()> {
-        let y = self.height - 1;
-        stdout().execute(cursor::MoveTo(0, y))?;
-        stdout().execute(SetForegroundColor(Color::DarkGrey))?;
-
-        print!("^Q:Quit ^S:Save ^Z:Undo ^Y:Redo ^F:Find ^G:Goto Tab:Mode 0-9A-F:Edit Hex a-z:Edit ASCII ↑↓←→:Navigate PgUp/PgDn:Page");
-        stdout().execute(ResetColor)?;
-
-        Ok(())
-    }
-
     pub fn get_visible_lines(&self) -> usize {
-        (self.height - 5) as usize // Вычитаем заголовок, статус бар и помощь
+        // Высота минус: заголовок (1), пустая строка (1), заголовок колонок (1), статус бар (1)
+        (self.height as usize).saturating_sub(4)
     }
 }

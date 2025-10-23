@@ -8,100 +8,106 @@ use anyhow::Result;
 use clap::Parser;
 use crossterm::{
     ExecutableCommand,
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     terminal::{self, ClearType, DisableLineWrap},
-    execute,
 };
-use std::time::{Duration, Instant};
-use std::io::{Write, stdout};
-use std::sync::Mutex;
-
-static LAST_KEY_EVENT: Mutex<Option<(KeyEvent, Instant)>> = Mutex::new(None);
+use std::io::stdout;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// File to edit (use --new to create new file)
-    file_path: String,
+    /// Path to the file to edit
+    file_path: Option<String>,
 
-    /// Read-only mode
-    #[arg(short, long)]
-    readonly: bool,
-
-    /// Create new file with specified size in bytes
+    /// Create a new file with specified size in bytes
     #[arg(short = 'n', long)]
     new: Option<usize>,
 
     /// Fill pattern for new file (hex value, default: 0x00)
-    #[arg(short = 'p', long, default_value = "0")]
-    pattern: String,
+    #[arg(short = 'f', long, default_value = "0")]
+    fill: String,
+
+    /// Open file in read-only mode
+    #[arg(short, long)]
+    readonly: bool,
+
+    /// Number of bytes per line (default: 16)
+    #[arg(short = 'w', long, default_value = "16")]
+    bytes_per_line: usize,
+
+    /// Configuration file path
+    #[arg(short, long)]
+    config: Option<String>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Загрузка конфигурации
+    let config = config::Config::load();
+
+    // Запуск редактора
+    run_editor(args, config)?;
+
+    Ok(())
+}
+
+fn run_editor(args: Args, config: config::Config) -> Result<()> {
     // Инициализация терминала
     terminal::enable_raw_mode()?;
-    stdout().execute(DisableLineWrap)?;
-    execute!(stdout(), crossterm::terminal::Clear(ClearType::All))?;
-    stdout().execute(terminal::EnterAlternateScreen)?;
-    stdout().execute(crossterm::cursor::Hide)?;
-    // Отключаем локальное эхо в терминале
-    print!("\x1b[12l");
-    stdout().flush()?;
+    stdout()
+        .execute(terminal::EnterAlternateScreen)?
+        .execute(terminal::Clear(ClearType::All))?
+        .execute(DisableLineWrap)?;
 
-    let result = run_editor(&args, args.new, &args.pattern);
+    let result = (|| -> Result<()> {
+        // Создание редактора
+        let mut editor = if let Some(size) = args.new {
+            // Создаем новый файл с указанным размером
+            let file_path = args.file_path.unwrap_or_else(|| "untitled".to_string());
+            let mut editor = editor::HexEditor::new_with_size(&args.fill, size, config.clone())?;
+            editor.file_path = file_path; // Устанавливаем имя файла
+            editor
+        } else if let Some(file_path) = args.file_path {
+            // Открываем существующий файл
+            editor::HexEditor::open(&file_path, args.readonly, config.clone())?
+        } else {
+            // Создаем пустой файл
+            editor::HexEditor::new(config.clone())?
+        };
 
-    // Восстановление терминала
-    stdout().execute(crossterm::cursor::Show)?;
-    stdout().execute(terminal::LeaveAlternateScreen)?;
-    // Включаем локальное эхо обратно
-    print!("\x1b[12h");
-    stdout().flush()?;
-    terminal::disable_raw_mode()?;
+        // Создание display
+        let mut display = display::Display::new()?;
 
-    result
-}
+        // Основной цикл
+        loop {
+            display.draw(&editor)?;
 
-fn is_duplicate_key_event(key: &KeyEvent) -> bool {
-    const DUPLICATE_THRESHOLD: Duration = Duration::from_millis(10);
-
-    if let Ok(mut last_event) = LAST_KEY_EVENT.lock() {
-        if let Some((last_key, last_time)) = *last_event {
-            if last_key == *key && last_time.elapsed() < DUPLICATE_THRESHOLD {
-                return true;
-            }
-        }
-        *last_event = Some((key.clone(), Instant::now()));
-        false
-    } else {
-        false
-    }
-}
-
-fn run_editor(args: &Args, new_size: Option<usize>, pattern: &str) -> Result<()> {
-    let mut editor = editor::HexEditor::new(&args.file_path, args.readonly, new_size, pattern)?;
-
-    loop {
-        // Очистка экрана и отрисовка
-        stdout().execute(terminal::Clear(ClearType::FromCursorDown))?;
-        editor.draw()?;
-        stdout().flush()?;
-
-        // Обработка ввода
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                // Проверяем на дублирование событий
-                if !is_duplicate_key_event(&key) {
-                    if !handle_input(&mut editor, key)? {
-                        break;
+            if event::poll(std::time::Duration::from_millis(100))? {
+                if let Event::Key(key) = event::read()? {
+                    // КРИТИЧНО: обрабатываем только события нажатия клавиш
+                    if key.kind == KeyEventKind::Press {
+                        if !handle_input(&mut editor, key)? {
+                            break;
+                        }
                     }
                 }
             }
-        }
-    }
 
-    Ok(())
+            // Обработка auto-save
+            if config.editor.auto_save {
+                editor.check_auto_save()?;
+            }
+        }
+
+        Ok(())
+    })();
+
+    // Восстановление терминала
+    terminal::disable_raw_mode()?;
+    stdout().execute(terminal::LeaveAlternateScreen)?;
+
+    result
 }
 
 fn handle_input(editor: &mut editor::HexEditor, key: KeyEvent) -> Result<bool> {
@@ -201,6 +207,7 @@ fn handle_input(editor: &mut editor::HexEditor, key: KeyEvent) -> Result<bool> {
         // Ввод hex значения
         KeyEvent {
             code: KeyCode::Char(c),
+            modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
             ..
         } if c.is_ascii_hexdigit() => {
             editor.input_hex_char(c)?;
@@ -209,6 +216,7 @@ fn handle_input(editor: &mut editor::HexEditor, key: KeyEvent) -> Result<bool> {
         // Ввод ASCII символа (в ASCII режиме)
         KeyEvent {
             code: KeyCode::Char(c),
+            modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
             ..
         } if editor.is_ascii_mode() && c.is_ascii_graphic() => {
             editor.input_ascii_char(c)?;

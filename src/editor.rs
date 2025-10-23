@@ -13,7 +13,7 @@ pub enum EditMode {
 }
 
 pub struct HexEditor {
-    file_path: String,
+    pub file_path: String,
     data: Vec<u8>,
     original_data: Vec<u8>,
     cursor_pos: usize,
@@ -30,45 +30,68 @@ pub struct HexEditor {
 }
 
 impl HexEditor {
-    pub fn new(file_path: &str, readonly: bool, new_size: Option<usize>, pattern: &str) -> Result<Self> {
-        let (data, original_data, modified, is_new) = if let Some(size) = new_size {
-            // Создаем новый файл
-            let fill_byte = u8::from_str_radix(pattern.trim_start_matches("0x"), 16)
-                .unwrap_or(0);
-            let new_data = vec![fill_byte; size];
-            (new_data.clone(), new_data, true, true)
+    pub fn new(config: Config) -> Result<Self> {
+        Self::new_with_size("0", 0, config)
+    }
+
+    pub fn new_with_size(fill_pattern: &str, size: usize, config: Config) -> Result<Self> {
+        // Парсим fill pattern из hex строки
+        let fill_byte = if fill_pattern.starts_with("0x") || fill_pattern.starts_with("0X") {
+            u8::from_str_radix(&fill_pattern[2..], 16).unwrap_or(0)
         } else {
-            // Открываем существующий файл
-            let mut file = File::open(file_path)?;
-            let mut data = Vec::new();
-            file.read_to_end(&mut data)?;
-            (data.clone(), data, false, false)
+            u8::from_str_radix(fill_pattern, 16).unwrap_or(0)
         };
 
+        // Создаем данные с указанным размером и заполнителем
+        let data = vec![fill_byte; size];
+        let original_data = data.clone();
+
         let display = Display::new()?;
-        let config = Config::load();
 
         Ok(Self {
-            file_path: file_path.to_string(),
+            file_path: "untitled".to_string(),
             data,
             original_data,
             cursor_pos: 0,
             view_offset: 0,
             mode: EditMode::Hex,
-            readonly,
-            modified,
+            readonly: false,
+            modified: size > 0, // Если размер > 0, то файл считается измененным
             bytes_per_line: config.editor.bytes_per_line,
             half_byte: None,
             display,
             undo_redo_stack: UndoRedoStack::default(),
             config,
-            is_new_file: is_new,
+            is_new_file: true,
         })
     }
 
-    pub fn draw(&self) -> Result<()> {
-        self.display.draw(self)
+    pub fn open(file_path: &str, readonly: bool, config: Config) -> Result<Self> {
+        // Открываем существующий файл
+        let mut file = File::open(file_path)?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data)?;
+
+        let display = Display::new()?;
+
+        Ok(Self {
+            file_path: file_path.to_string(),
+            data: data.clone(),
+            original_data: data,
+            cursor_pos: 0,
+            view_offset: 0,
+            mode: EditMode::Hex,
+            readonly,
+            modified: false,
+            bytes_per_line: config.editor.bytes_per_line,
+            half_byte: None,
+            display,
+            undo_redo_stack: UndoRedoStack::default(),
+            config,
+            is_new_file: false,
+        })
     }
+
 
     pub fn save(&mut self) -> Result<()> {
         if self.readonly {
@@ -357,5 +380,12 @@ impl HexEditor {
 
     pub fn is_new_file(&self) -> bool {
         self.is_new_file
+    }
+
+    pub fn check_auto_save(&mut self) -> Result<()> {
+        if self.config.editor.auto_save && self.modified && !self.readonly {
+            self.save()?;
+        }
+        Ok(())
     }
 }
