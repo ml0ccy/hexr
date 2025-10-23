@@ -1,6 +1,6 @@
 # HexED - Cross-Platform CLI Hex Editor
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)
 [![Crates.io](https://img.shields.io/crates/v/hexed.svg)](https://crates.io/crates/hexed)
